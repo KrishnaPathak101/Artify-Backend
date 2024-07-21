@@ -24,7 +24,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(cors(
     {
-        origin: ['http://localhost:5173','http://localhost:4173','https://artify-frontend.netlify.app', 'https://artfy-frontend-un7fz0uje-krishnajis-projects.vercel.app', 'https://artfy-frontend.vercel.app']
+        origin: ['http://localhost:5173','https://venerable-lollipop-b4c9a0.netlify.app','http://localhost:4173','https://artify-frontend.netlify.app', 'https://artfy-frontend-un7fz0uje-krishnajis-projects.vercel.app', 'https://artfy-frontend.vercel.app']
     }
 ));
 
