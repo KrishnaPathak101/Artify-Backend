@@ -10,44 +10,26 @@ import User from './models/User.js';
 import Cart from './models/Cart.js';
 import nodemailer from 'nodemailer';
 import Razorpay from 'razorpay';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import xssClean from 'xss-clean';
-import mongoSanitize from 'express-mongo-sanitize';
-import hpp from 'hpp';
-import csrf from 'csurf';
-import cookieParser from 'cookie-parser';
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const YOUR_DOMAIN = 'http://localhost:5000';
 dotenv.config();
 
-app.use(cors({
-    origin: 'http://localhost:5173', // Adjust this to match your frontend URL
-    methods: 'GET,POST,PUT,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'] // Add 'X-CSRF-Token' here
-}));
+
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(helmet());
-app.use(xssClean());
-app.use(mongoSanitize());
-app.use(hpp());
-app.use(cookieParser());
 
-// Rate Limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+app.use(cors(
+    {
+        origin: 'http://localhost:5173'
+    }
+));
 
 // CSRF Protection
-const csrfProtection = csrf({ cookie: true });
-app.use(csrfProtection);
+
 
 // Set up multer for handling file uploads
 const storage = multer.memoryStorage();
@@ -68,8 +50,8 @@ cloudinary.config({
 
 // Razorpay setup
 const razorpay = new Razorpay({
-    key_id: process.env.KEY_ID,
-    key_secret: process.env.KEY_SECRET,
+    key_id: process.env.key_id,
+    key_secret: process.env.key_secret,
 });
 
 // Secure Routes
@@ -203,34 +185,45 @@ app.post('/api/sell-art', upload.array('images'), async (req, res) => {
 
 app.put('/api/sell-art/:id', upload.array('images'), async (req, res) => {
     const { id } = req.params;
-    const { category, title, description, price } = req.body;
-    const images = req.files;
+    const { category, title, description, price, images } = req.body;
+    const files = req.files;
+
+    console.log('req.body:', req.body);
+    console.log('req.files:', files);
 
     if (!category || !title || !description || !price) {
         return res.status(422).json({ error: 'Please add all the fields' });
     }
 
+    let imageUrls = [];
+
     try {
+        // Handle file uploads
+        if (files && files.length > 0) {
+            imageUrls = await Promise.all(
+                files.map(file => new Promise((resolve, reject) => {
+                    const uploadStream = cloudinary.uploader.upload_stream(
+                        { resource_type: 'image', folder: 'sell_art', quality_analysis: true, transformation: [{ width: 500, height: 500, crop: 'limit' }], quality: 'auto' },
+                        (error, result) => {
+                            if (error) {
+                                reject(error);
+                            } else {
+                                resolve(result.secure_url);
+                            }
+                        }
+                    );
+                    uploadStream.end(file.buffer);
+                }))
+            );
+        } else if (images) {
+            // If no files but images URL is provided
+            imageUrls = Array.isArray(images) ? images : [images];
+        }
+
         const art = await SellArt.findById(id);
         if (!art) {
             return res.status(404).json({ message: 'Art not found' });
         }
-
-        const imageUrls = await Promise.all(
-            images.map(file => new Promise((resolve, reject) => {
-                const uploadStream = cloudinary.uploader.upload_stream(
-                    { resource_type: 'image', folder: 'sell_art', quality_analysis: true, transformation: [{ width: 500, height: 500, crop: 'limit' }], quality: 'auto' },
-                    (error, result) => {
-                        if (error) {
-                            reject(error);
-                        } else {
-                            resolve(result.secure_url);
-                        }
-                    }
-                );
-                uploadStream.end(file.buffer);
-            }))
-        );
 
         const updatedArt = await SellArt.findByIdAndUpdate(id, {
             category,
@@ -276,15 +269,21 @@ app.get('/api/art/:id', async (req, res) => {
 // Delete from cart 
 app.delete('/deletefromcart', async (req, res) => {
     const { cartItems } = req.body;
-    const { userId, artId } = cartItems;
 
+    // Assuming cartItems is an array and you want to delete each item
     try {
-        const result = await Cart.findOneAndDelete({ artId, userId });
-        if (!result) {
-            return res.status(404).json({ message: 'Item not found in cart' });
+        for (const item of cartItems) {
+            const { userId, artId } = item;
+            const result = await Cart.findOneAndDelete({ artId, userId });
+            
+            if (!result) {
+                console.log(`Item not found in cart: ${artId}, ${userId}`);
+            } else {
+                console.log(`Item deleted from cart: ${artId}, ${userId}`);
+            }
         }
 
-        res.status(200).json({ message: 'Item deleted from cart' });
+        res.status(200).json({ message: 'Items deleted from cart' });
     } catch (error) {
         console.error('Error deleting cart items:', error);
         res.status(500).json({ message: 'Server error' });
@@ -350,6 +349,7 @@ app.get('/api/cart/:userId', async (req, res) => {
 
     try {
         const userCart = await Cart.findOne({ userId });
+        console.log(userCart);
         if (!userCart) {
             return res.status(404).json({ error: 'Cart not found' });
         }
@@ -391,10 +391,24 @@ app.delete('/api/cart/:userId/:artId', async (req, res) => {
     }
 });
 
-// CSRF token endpoint
-app.get('/csrf-token', csrfProtection, (req, res) => {
-    res.json({ csrfToken: req.csrfToken() });
+
+// delete art
+
+app.delete('/api/art/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const art = await SellArt.findByIdAndDelete(id);
+        if (!art) {
+            return res.status(404).json({ message: 'Art not found' });
+        }
+        res.status(200).json({ message: 'Art deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting art:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
 });
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
