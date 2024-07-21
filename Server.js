@@ -24,7 +24,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(cors(
     {
-        origin: 'http://localhost:5173'
+        origin: ['http://localhost:5173', 'https://artfy-frontend-un7fz0uje-krishnajis-projects.vercel.app']
     }
 ));
 
